@@ -1,0 +1,72 @@
+import scala.actors.{Actor, Future}
+import scala.collection.mutable
+import scala.collection.mutable.ListBuffer
+import scala.io.Source
+/*
+@author Yuniko
+2019/9/21
+*/
+
+/* 基于actor实现并发 wordcount */
+//定义Task处理wordcount任务
+class Task extends  Actor {
+  override def act(): Unit = {
+    loop{
+      react{
+        // 任务提交
+        case submitTask(filename) =>{
+          val iterator = Source.fromFile(filename).getLines()
+          var result = iterator.flatMap(_.split(" "))
+                                      .map((_,1))
+                                      .toList.groupBy(_._1).mapValues(_.size)
+          //异步返回消息
+          sender ! ResultTask(result)
+        }
+        case StopTask =>{
+          exit()
+        }
+      }
+    }
+  }
+}
+//提交任务样例类
+case class submitTask(filename:String)
+//返回结果样例类
+case class ResultTask(map:Map[String,Int])
+// 关闭任务
+case object StopTask
+object ActorWordCount {
+  def main(args: Array[String]): Unit = {
+
+    //定义保存任务的集合
+    val ReplySet = new  mutable.HashSet[Future[Any]]
+
+    //定义保存任务结果的集合
+    val ResultList = new ListBuffer[ResultTask]
+
+    val files = Array[String]("src/TaskResource/word1","src/TaskResource/word2")
+    for(f <- files) {
+
+      val actor = new Task
+      val TaskResult = actor.start() !! submitTask(f) //异步有返回值的消息
+       ReplySet += TaskResult //保存 返回结果的引用
+    }
+    while(ReplySet.size>0) {
+        // 当还没有任务执行完
+
+      //.isSet 判断任务完成 TaskResult中有结果
+      //留下任务完成的
+      var toCompute = ReplySet.filter(_.isSet)
+      for( t <- toCompute) {
+       val  result = t.apply().asInstanceOf[ResultTask] //调用apply将结果取出
+        ResultList+=result
+        //任务已经完成 将完成的任务删除
+        ReplySet -= t
+      }
+     Thread.sleep(100)
+    }
+    //执行全部任务结果的reduce
+    var fr = ResultList.flatMap(_.map).groupBy(_._1).mapValues(_.foldLeft(0)(_+_._2))
+      println(fr)
+  }
+}
